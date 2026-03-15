@@ -6,25 +6,31 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  TextInput,
   KeyboardAvoidingView,
   Platform,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import axios from 'axios';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 const COLORS = {
-  primary: '#6C63FF',
-  background: '#0F0F1A',
-  surface: '#1A1A2E',
-  card: '#252542',
+  primary: '#8B5CF6',
+  primaryDark: '#6D28D9',
+  primaryLight: '#A78BFA',
+  background: '#0A0A0F',
+  surface: '#13131A',
+  card: '#1C1C27',
+  cardBorder: '#2D2D3A',
   text: '#FFFFFF',
-  textSecondary: '#9CA3AF',
+  textSecondary: '#71717A',
+  accent: '#22D3EE',
+  accentPink: '#EC4899',
   success: '#10B981',
-  warning: '#F59E0B',
+  warning: '#FBBF24',
 };
 
 interface CoachMessage {
@@ -48,11 +54,39 @@ export default function CoachScreen() {
   const [userName, setUserName] = useState('Utilisateur');
   const [lastContext, setLastContext] = useState<InsightContext | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  const [fadeAnim] = useState(new Animated.Value(0));
+  const [pulseAnim] = useState(new Animated.Value(1));
 
   useEffect(() => {
     fetchMessages();
     fetchProfile();
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 600,
+      useNativeDriver: true,
+    }).start();
   }, []);
+
+  useEffect(() => {
+    if (generating) {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.1,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulse.start();
+      return () => pulse.stop();
+    }
+  }, [generating]);
 
   const fetchMessages = async () => {
     try {
@@ -83,7 +117,6 @@ export default function CoachScreen() {
       
       setLastContext(response.data.context);
       
-      // Add the new message to the list
       const newMessage: CoachMessage = {
         id: Date.now().toString(),
         role: 'assistant',
@@ -92,7 +125,6 @@ export default function CoachScreen() {
       };
       setMessages((prev) => [...prev, newMessage]);
       
-      // Scroll to bottom
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       }, 100);
@@ -131,7 +163,13 @@ export default function CoachScreen() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
+        <LinearGradient
+          colors={[COLORS.primary + '30', COLORS.accentPink + '20']}
+          style={styles.loadingIconBg}
+        >
+          <Ionicons name="sparkles" size={32} color={COLORS.primary} />
+        </LinearGradient>
+        <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 16 }} />
         <Text style={styles.loadingText}>Chargement...</Text>
       </View>
     );
@@ -144,35 +182,63 @@ export default function CoachScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <Animated.View style={[styles.header, { opacity: fadeAnim }]}>
           <View style={styles.headerLeft}>
-            <View style={styles.coachAvatar}>
-              <Ionicons name="sparkles" size={24} color={COLORS.primary} />
-            </View>
+            <LinearGradient
+              colors={[COLORS.primary, COLORS.accentPink]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.coachAvatar}
+            >
+              <Ionicons name="sparkles" size={28} color="#FFFFFF" />
+            </LinearGradient>
             <View>
               <Text style={styles.coachName}>Coach IA</Text>
-              <Text style={styles.coachSubtitle}>Psychologie des habitudes</Text>
+              <View style={styles.statusContainer}>
+                <View style={styles.statusDot} />
+                <Text style={styles.coachSubtitle}>Psychologie des habitudes</Text>
+              </View>
             </View>
           </View>
-        </View>
+        </Animated.View>
 
         {/* Messages */}
         <ScrollView
           ref={scrollViewRef}
           style={styles.messagesContainer}
           contentContainerStyle={styles.messagesContent}
+          showsVerticalScrollIndicator={false}
           onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
         >
           {messages.length === 0 ? (
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIcon}>
-                <Ionicons name="chatbubbles-outline" size={48} color={COLORS.textSecondary} />
-              </View>
+            <Animated.View style={[styles.emptyState, { opacity: fadeAnim }]}>
+              <LinearGradient
+                colors={['rgba(139, 92, 246, 0.2)', 'rgba(236, 72, 153, 0.1)']}
+                style={styles.emptyIconBg}
+              >
+                <Ionicons name="chatbubbles" size={48} color={COLORS.primary} />
+              </LinearGradient>
               <Text style={styles.emptyTitle}>Bienvenue !</Text>
               <Text style={styles.emptyText}>
-                Je suis ton coach personnel basé sur les principes de la TCC.{' '}\nDemande-moi un insight pour recevoir des conseils personnalisés.
+                Je suis ton coach personnel basé sur les principes de la TCC.{"\n"}Demande-moi un insight pour recevoir des conseils personnalisés.
               </Text>
-            </View>
+
+              {/* Features List */}
+              <View style={styles.featuresList}>
+                {[
+                  { icon: 'analytics', text: 'Analyse de tes habitudes' },
+                  { icon: 'bulb', text: 'Conseils personnalisés TCC' },
+                  { icon: 'trending-up', text: 'Suivi de ta progression' },
+                ].map((feature, index) => (
+                  <View key={index} style={styles.featureItem}>
+                    <View style={styles.featureIcon}>
+                      <Ionicons name={feature.icon as any} size={18} color={COLORS.primary} />
+                    </View>
+                    <Text style={styles.featureText}>{feature.text}</Text>
+                  </View>
+                ))}
+              </View>
+            </Animated.View>
           ) : (
             messages.map((message, index) => {
               const showDate =
@@ -181,18 +247,29 @@ export default function CoachScreen() {
                   formatDate(messages[index - 1].created_at);
 
               return (
-                <View key={message.id}>
+                <Animated.View 
+                  key={message.id}
+                  style={{ opacity: fadeAnim }}
+                >
                   {showDate && (
                     <View style={styles.dateHeader}>
-                      <Text style={styles.dateText}>
-                        {formatDate(message.created_at)}
-                      </Text>
+                      <LinearGradient
+                        colors={[COLORS.surface, COLORS.card]}
+                        style={styles.dateBadge}
+                      >
+                        <Text style={styles.dateText}>
+                          {formatDate(message.created_at)}
+                        </Text>
+                      </LinearGradient>
                     </View>
                   )}
                   <View style={styles.messageRow}>
-                    <View style={styles.messageAvatar}>
+                    <LinearGradient
+                      colors={[COLORS.primary + '30', COLORS.accentPink + '20']}
+                      style={styles.messageAvatar}
+                    >
                       <Ionicons name="sparkles" size={16} color={COLORS.primary} />
-                    </View>
+                    </LinearGradient>
                     <View style={styles.messageBubble}>
                       <Text style={styles.messageText}>{message.content}</Text>
                       <Text style={styles.messageTime}>
@@ -200,22 +277,28 @@ export default function CoachScreen() {
                       </Text>
                     </View>
                   </View>
-                </View>
+                </Animated.View>
               );
             })
           )}
 
           {generating && (
             <View style={styles.messageRow}>
-              <View style={styles.messageAvatar}>
-                <Ionicons name="sparkles" size={16} color={COLORS.primary} />
-              </View>
+              <Animated.View style={[{ transform: [{ scale: pulseAnim }] }]}>
+                <LinearGradient
+                  colors={[COLORS.primary + '30', COLORS.accentPink + '20']}
+                  style={styles.messageAvatar}
+                >
+                  <Ionicons name="sparkles" size={16} color={COLORS.primary} />
+                </LinearGradient>
+              </Animated.View>
               <View style={styles.messageBubble}>
                 <View style={styles.typingIndicator}>
                   <View style={[styles.typingDot, styles.typingDot1]} />
                   <View style={[styles.typingDot, styles.typingDot2]} />
                   <View style={[styles.typingDot, styles.typingDot3]} />
                 </View>
+                <Text style={styles.generatingText}>Génération en cours...</Text>
               </View>
             </View>
           )}
@@ -225,6 +308,9 @@ export default function CoachScreen() {
         {lastContext && (
           <View style={styles.contextCard}>
             <View style={styles.contextItem}>
+              <View style={[styles.contextIconBg, { backgroundColor: COLORS.success + '20' }]}>
+                <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
+              </View>
               <Text style={styles.contextValue}>
                 {lastContext.habits_completed}/{lastContext.habits_total}
               </Text>
@@ -232,15 +318,21 @@ export default function CoachScreen() {
             </View>
             <View style={styles.contextDivider} />
             <View style={styles.contextItem}>
+              <View style={[styles.contextIconBg, { backgroundColor: COLORS.accentPink + '20' }]}>
+                <Ionicons name="heart" size={18} color={COLORS.accentPink} />
+              </View>
               <Text style={styles.contextValue}>{lastContext.mood}/5</Text>
               <Text style={styles.contextLabel}>Humeur</Text>
             </View>
             <View style={styles.contextDivider} />
             <View style={styles.contextItem}>
+              <View style={[styles.contextIconBg, { backgroundColor: COLORS.warning + '20' }]}>
+                <Ionicons name="flame" size={18} color={COLORS.warning} />
+              </View>
               <Text style={styles.contextValue}>
                 {lastContext.average_streak}j
               </Text>
-              <Text style={styles.contextLabel}>Série moy.</Text>
+              <Text style={styles.contextLabel}>Série</Text>
             </View>
           </View>
         )}
@@ -249,22 +341,30 @@ export default function CoachScreen() {
         <View style={styles.inputContainer}>
           <TouchableOpacity
             style={[
-              styles.insightButton,
+              styles.insightButtonWrapper,
               generating && styles.insightButtonDisabled,
             ]}
             onPress={requestInsight}
             disabled={generating}
+            activeOpacity={0.9}
           >
-            {generating ? (
-              <ActivityIndicator color={COLORS.text} />
-            ) : (
-              <>
-                <Ionicons name="sparkles" size={20} color={COLORS.text} />
-                <Text style={styles.insightButtonText}>
-                  Demander un insight
-                </Text>
-              </>
-            )}
+            <LinearGradient
+              colors={generating ? [COLORS.card, COLORS.card] : [COLORS.primary, COLORS.accentPink]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.insightButton}
+            >
+              {generating ? (
+                <ActivityIndicator color={COLORS.textSecondary} />
+              ) : (
+                <>
+                  <Ionicons name="sparkles" size={22} color={COLORS.text} />
+                  <Text style={styles.insightButtonText}>
+                    Demander un insight
+                  </Text>
+                </>
+              )}
+            </LinearGradient>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -286,66 +386,89 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  loadingIconBg: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   loadingText: {
     color: COLORS.textSecondary,
     marginTop: 12,
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '500',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.surface,
+    borderBottomColor: COLORS.cardBorder,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   coachAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.primary + '20',
+    width: 56,
+    height: 56,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 14,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
   },
   coachName: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
     color: COLORS.text,
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.success,
+    marginRight: 6,
   },
   coachSubtitle: {
     fontSize: 13,
     color: COLORS.textSecondary,
-    marginTop: 2,
+    fontWeight: '500',
   },
   messagesContainer: {
     flex: 1,
   },
   messagesContent: {
-    padding: 16,
+    padding: 20,
     paddingBottom: 8,
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 60,
+    paddingVertical: 40,
   },
-  emptyIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: COLORS.surface,
+  emptyIconBg: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   emptyTitle: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '700',
     color: COLORS.text,
   },
@@ -354,20 +477,53 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'center',
     marginTop: 8,
-    lineHeight: 22,
+    lineHeight: 24,
     paddingHorizontal: 20,
+  },
+  featuresList: {
+    marginTop: 32,
+    width: '100%',
+    paddingHorizontal: 20,
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+  },
+  featureIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: COLORS.primary + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  featureText: {
+    fontSize: 15,
+    color: COLORS.text,
+    fontWeight: '500',
   },
   dateHeader: {
     alignItems: 'center',
-    marginVertical: 16,
+    marginVertical: 20,
+  },
+  dateBadge: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
   },
   dateText: {
     fontSize: 13,
     color: COLORS.textSecondary,
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    fontWeight: '500',
   },
   messageRow: {
     flexDirection: 'row',
@@ -375,43 +531,44 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   messageAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.primary + '20',
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
+    marginRight: 10,
   },
   messageBubble: {
     backgroundColor: COLORS.surface,
-    borderRadius: 16,
-    borderBottomLeftRadius: 4,
-    padding: 14,
+    borderRadius: 18,
+    borderBottomLeftRadius: 6,
+    padding: 16,
     maxWidth: '80%',
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
   },
   messageText: {
     fontSize: 15,
     color: COLORS.text,
-    lineHeight: 22,
+    lineHeight: 24,
   },
   messageTime: {
     fontSize: 11,
     color: COLORS.textSecondary,
-    marginTop: 6,
+    marginTop: 8,
+    fontWeight: '500',
   },
   typingIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 20,
+    height: 24,
   },
   typingDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: COLORS.primary,
-    marginHorizontal: 2,
-    opacity: 0.4,
+    marginHorizontal: 3,
   },
   typingDot1: {
     opacity: 1,
@@ -422,51 +579,76 @@ const styles = StyleSheet.create({
   typingDot3: {
     opacity: 0.4,
   },
+  generatingText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
   contextCard: {
     flexDirection: 'row',
     backgroundColor: COLORS.surface,
-    marginHorizontal: 16,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
+    marginHorizontal: 20,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
   },
   contextItem: {
     flex: 1,
     alignItems: 'center',
   },
+  contextIconBg: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
   contextValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: COLORS.primary,
+    color: COLORS.text,
   },
   contextLabel: {
     fontSize: 12,
     color: COLORS.textSecondary,
     marginTop: 2,
+    fontWeight: '500',
   },
   contextDivider: {
     width: 1,
-    backgroundColor: COLORS.card,
+    backgroundColor: COLORS.cardBorder,
+    marginHorizontal: 8,
   },
   inputContainer: {
-    padding: 16,
-    paddingBottom: 8,
+    padding: 20,
+    paddingTop: 8,
+  },
+  insightButtonWrapper: {
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  insightButtonDisabled: {
+    shadowOpacity: 0,
+    elevation: 0,
   },
   insightButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.primary,
-    paddingVertical: 16,
-    borderRadius: 14,
-  },
-  insightButtonDisabled: {
-    opacity: 0.6,
+    paddingVertical: 18,
+    borderRadius: 18,
+    gap: 10,
   },
   insightButtonText: {
     color: COLORS.text,
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '600',
-    marginLeft: 8,
   },
 });

@@ -3,15 +3,19 @@ import { Tabs } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const COLORS = {
-  primary: '#6C63FF',
-  background: '#0F0F1A',
-  surface: '#1A1A2E',
+  primary: '#8B5CF6',
+  primaryDark: '#6D28D9',
+  background: '#0A0A0F',
+  surface: '#13131A',
+  card: '#1C1C27',
   text: '#FFFFFF',
-  textSecondary: '#9CA3AF',
+  textSecondary: '#71717A',
+  accent: '#22D3EE',
   success: '#10B981',
-  warning: '#F59E0B',
+  warning: '#FBBF24',
 };
 
 export default function RootLayout() {
@@ -25,14 +29,17 @@ export default function RootLayout() {
             tabBarActiveTintColor: COLORS.primary,
             tabBarInactiveTintColor: COLORS.textSecondary,
             tabBarLabelStyle: styles.tabLabel,
+            tabBarItemStyle: styles.tabItem,
           }}
         >
           <Tabs.Screen
             name="index"
             options={{
               title: 'Accueil',
-              tabBarIcon: ({ color, size }) => (
-                <Ionicons name="home" size={size} color={color} />
+              tabBarIcon: ({ color, focused }) => (
+                <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+                  <Ionicons name={focused ? "home" : "home-outline"} size={22} color={color} />
+                </View>
               ),
             }}
           />
@@ -40,8 +47,10 @@ export default function RootLayout() {
             name="habits"
             options={{
               title: 'Habitudes',
-              tabBarIcon: ({ color, size }) => (
-                <Ionicons name="checkmark-circle" size={size} color={color} />
+              tabBarIcon: ({ color, focused }) => (
+                <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+                  <Ionicons name={focused ? "checkmark-circle" : "checkmark-circle-outline"} size={22} color={color} />
+                </View>
               ),
             }}
           />
@@ -49,8 +58,10 @@ export default function RootLayout() {
             name="coach"
             options={{
               title: 'Coach',
-              tabBarIcon: ({ color, size }) => (
-                <Ionicons name="chatbubbles" size={size} color={color} />
+              tabBarIcon: ({ color, focused }) => (
+                <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+                  <Ionicons name={focused ? "sparkles" : "sparkles-outline"} size={22} color={color} />
+                </View>
               ),
             }}
           />
@@ -58,8 +69,10 @@ export default function RootLayout() {
             name="profile"
             options={{
               title: 'Profil',
-              tabBarIcon: ({ color, size }) => (
-                <Ionicons name="person" size={size} color={color} />
+              tabBarIcon: ({ color, focused }) => (
+                <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+                  <Ionicons name={focused ? "person" : "person-outline"} size={22} color={color} />
+                </View>
               ),
             }}
           />
@@ -76,14 +89,32 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     backgroundColor: COLORS.surface,
-    borderTopColor: '#2D2D44',
-    borderTopWidth: 1,
-    height: 60,
-    paddingBottom: 8,
-    paddingTop: 8,
+    borderTopWidth: 0,
+    height: 70,
+    paddingBottom: 10,
+    paddingTop: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 20,
   },
   tabLabel: {
     fontSize: 11,
     fontWeight: '600',
+    marginTop: 4,
+  },
+  tabItem: {
+    paddingTop: 4,
+  },
+  iconContainer: {
+    width: 40,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconContainerActive: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
   },
 });
