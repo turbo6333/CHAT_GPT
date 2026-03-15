@@ -9,6 +9,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
+  TextInput,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,7 +33,15 @@ const COLORS = {
   accentPink: '#EC4899',
   success: '#10B981',
   warning: '#FBBF24',
+  userBubble: '#3B3B5C',
 };
+
+const QUICK_PROMPTS = [
+  { icon: 'sad-outline', text: 'Je ne me sens pas bien', color: '#EF4444' },
+  { icon: 'bulb-outline', text: 'Conseils motivation', color: '#FBBF24' },
+  { icon: 'fitness-outline', text: 'Aide pour mes habitudes', color: '#10B981' },
+  { icon: 'moon-outline', text: 'Problèmes de sommeil', color: '#8B5CF6' },
+];
 
 interface CoachMessage {
   id: string;
@@ -40,22 +50,17 @@ interface CoachMessage {
   created_at: string;
 }
 
-interface InsightContext {
-  habits_completed: number;
-  habits_total: number;
-  mood: number | string;
-  average_streak: number;
-}
-
 export default function CoachScreen() {
   const [messages, setMessages] = useState<CoachMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
+  const [sending, setSending] = useState(false);
   const [userName, setUserName] = useState('Utilisateur');
-  const [lastContext, setLastContext] = useState<InsightContext | null>(null);
+  const [inputText, setInputText] = useState('');
+  const [showQuickPrompts, setShowQuickPrompts] = useState(true);
   const scrollViewRef = useRef<ScrollView>(null);
   const [fadeAnim] = useState(new Animated.Value(0));
   const [pulseAnim] = useState(new Animated.Value(1));
+  const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     fetchMessages();
@@ -68,7 +73,7 @@ export default function CoachScreen() {
   }, []);
 
   useEffect(() => {
-    if (generating) {
+    if (sending) {
       const pulse = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
@@ -86,12 +91,15 @@ export default function CoachScreen() {
       pulse.start();
       return () => pulse.stop();
     }
-  }, [generating]);
+  }, [sending]);
 
   const fetchMessages = async () => {
     try {
       const response = await axios.get(`${BACKEND_URL}/api/coach/messages`);
       setMessages(response.data);
+      if (response.data.length > 0) {
+        setShowQuickPrompts(false);
+      }
     } catch (error) {
       console.error('Error fetching messages:', error);
     } finally {
@@ -108,30 +116,71 @@ export default function CoachScreen() {
     }
   };
 
-  const requestInsight = async () => {
-    setGenerating(true);
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || sending) return;
+    
+    const messageText = text.trim();
+    setInputText('');
+    setSending(true);
+    setShowQuickPrompts(false);
+    Keyboard.dismiss();
+
+    // Optimistically add user message
+    const tempUserMsg: CoachMessage = {
+      id: `temp-${Date.now()}`,
+      role: 'user',
+      content: messageText,
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, tempUserMsg]);
+
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+
     try {
-      const response = await axios.post(`${BACKEND_URL}/api/coach/insight`, {
+      const response = await axios.post(`${BACKEND_URL}/api/coach/chat`, {
+        message: messageText,
         user_name: userName,
       });
-      
-      setLastContext(response.data.context);
-      
-      const newMessage: CoachMessage = {
-        id: Date.now().toString(),
+
+      // Add assistant response
+      const assistantMsg: CoachMessage = {
+        id: response.data.assistant_message_id,
         role: 'assistant',
-        content: response.data.insight,
+        content: response.data.response,
         created_at: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, newMessage]);
-      
+
+      setMessages(prev => {
+        // Replace temp user message with real one and add assistant response
+        const filtered = prev.filter(m => m.id !== tempUserMsg.id);
+        return [...filtered, { ...tempUserMsg, id: response.data.user_message_id }, assistantMsg];
+      });
+
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       }, 100);
     } catch (error) {
-      console.error('Error getting insight:', error);
+      console.error('Error sending message:', error);
+      // Remove optimistic message on error
+      setMessages(prev => prev.filter(m => m.id !== tempUserMsg.id));
     } finally {
-      setGenerating(false);
+      setSending(false);
+    }
+  };
+
+  const handleQuickPrompt = (prompt: string) => {
+    sendMessage(prompt);
+  };
+
+  const clearHistory = async () => {
+    try {
+      await axios.delete(`${BACKEND_URL}/api/coach/messages`);
+      setMessages([]);
+      setShowQuickPrompts(true);
+    } catch (error) {
+      console.error('Error clearing history:', error);
     }
   };
 
@@ -180,6 +229,7 @@ export default function CoachScreen() {
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         {/* Header */}
         <Animated.View style={[styles.header, { opacity: fadeAnim }]}>
@@ -196,10 +246,15 @@ export default function CoachScreen() {
               <Text style={styles.coachName}>Coach IA</Text>
               <View style={styles.statusContainer}>
                 <View style={styles.statusDot} />
-                <Text style={styles.coachSubtitle}>Psychologie des habitudes</Text>
+                <Text style={styles.coachSubtitle}>Toujours là pour toi</Text>
               </View>
             </View>
           </View>
+          {messages.length > 0 && (
+            <TouchableOpacity style={styles.clearButton} onPress={clearHistory}>
+              <Ionicons name="trash-outline" size={20} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          )}
         </Animated.View>
 
         {/* Messages */}
@@ -209,8 +264,9 @@ export default function CoachScreen() {
           contentContainerStyle={styles.messagesContent}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+          keyboardShouldPersistTaps="handled"
         >
-          {messages.length === 0 ? (
+          {messages.length === 0 && showQuickPrompts ? (
             <Animated.View style={[styles.emptyState, { opacity: fadeAnim }]}>
               <LinearGradient
                 colors={['rgba(139, 92, 246, 0.2)', 'rgba(236, 72, 153, 0.1)']}
@@ -218,154 +274,143 @@ export default function CoachScreen() {
               >
                 <Ionicons name="chatbubbles" size={48} color={COLORS.primary} />
               </LinearGradient>
-              <Text style={styles.emptyTitle}>Bienvenue !</Text>
+              <Text style={styles.emptyTitle}>Salut {userName} ! 👋</Text>
               <Text style={styles.emptyText}>
-                Je suis ton coach personnel basé sur les principes de la TCC.{"\n"}Demande-moi un insight pour recevoir des conseils personnalisés.
+                Je suis ton coach personnel. Tu peux me parler{"\n"}de tout ce qui te préoccupe ou me demander{"\n"}des conseils pour tes habitudes.
               </Text>
 
-              {/* Features List */}
-              <View style={styles.featuresList}>
-                {[
-                  { icon: 'analytics', text: 'Analyse de tes habitudes' },
-                  { icon: 'bulb', text: 'Conseils personnalisés TCC' },
-                  { icon: 'trending-up', text: 'Suivi de ta progression' },
-                ].map((feature, index) => (
-                  <View key={index} style={styles.featureItem}>
-                    <View style={styles.featureIcon}>
-                      <Ionicons name={feature.icon as any} size={18} color={COLORS.primary} />
+              {/* Quick Prompts */}
+              <View style={styles.quickPromptsContainer}>
+                <Text style={styles.quickPromptsTitle}>Suggestions pour commencer :</Text>
+                {QUICK_PROMPTS.map((prompt, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={styles.quickPromptButton}
+                    onPress={() => handleQuickPrompt(prompt.text)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={[styles.quickPromptIcon, { backgroundColor: prompt.color + '20' }]}>
+                      <Ionicons name={prompt.icon as any} size={20} color={prompt.color} />
                     </View>
-                    <Text style={styles.featureText}>{feature.text}</Text>
-                  </View>
+                    <Text style={styles.quickPromptText}>{prompt.text}</Text>
+                    <Ionicons name="chevron-forward" size={18} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
                 ))}
               </View>
             </Animated.View>
           ) : (
-            messages.map((message, index) => {
-              const showDate =
-                index === 0 ||
-                formatDate(message.created_at) !==
-                  formatDate(messages[index - 1].created_at);
+            <>
+              {messages.map((message, index) => {
+                const showDate =
+                  index === 0 ||
+                  formatDate(message.created_at) !==
+                    formatDate(messages[index - 1].created_at);
+                const isUser = message.role === 'user';
 
-              return (
-                <Animated.View 
-                  key={message.id}
-                  style={{ opacity: fadeAnim }}
-                >
-                  {showDate && (
-                    <View style={styles.dateHeader}>
-                      <LinearGradient
-                        colors={[COLORS.surface, COLORS.card]}
-                        style={styles.dateBadge}
-                      >
-                        <Text style={styles.dateText}>
-                          {formatDate(message.created_at)}
+                return (
+                  <Animated.View key={message.id} style={{ opacity: fadeAnim }}>
+                    {showDate && (
+                      <View style={styles.dateHeader}>
+                        <LinearGradient
+                          colors={[COLORS.surface, COLORS.card]}
+                          style={styles.dateBadge}
+                        >
+                          <Text style={styles.dateText}>
+                            {formatDate(message.created_at)}
+                          </Text>
+                        </LinearGradient>
+                      </View>
+                    )}
+                    <View style={[styles.messageRow, isUser && styles.messageRowUser]}>
+                      {!isUser && (
+                        <LinearGradient
+                          colors={[COLORS.primary + '30', COLORS.accentPink + '20']}
+                          style={styles.messageAvatar}
+                        >
+                          <Ionicons name="sparkles" size={16} color={COLORS.primary} />
+                        </LinearGradient>
+                      )}
+                      <View style={[
+                        styles.messageBubble,
+                        isUser ? styles.userBubble : styles.assistantBubble
+                      ]}>
+                        <Text style={styles.messageText}>{message.content}</Text>
+                        <Text style={[styles.messageTime, isUser && styles.messageTimeUser]}>
+                          {formatTime(message.created_at)}
                         </Text>
-                      </LinearGradient>
+                      </View>
+                      {isUser && (
+                        <View style={styles.userAvatar}>
+                          <Text style={styles.userAvatarText}>
+                            {userName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                      )}
                     </View>
-                  )}
-                  <View style={styles.messageRow}>
+                  </Animated.View>
+                );
+              })}
+
+              {sending && (
+                <View style={styles.messageRow}>
+                  <Animated.View style={[{ transform: [{ scale: pulseAnim }] }]}>
                     <LinearGradient
                       colors={[COLORS.primary + '30', COLORS.accentPink + '20']}
                       style={styles.messageAvatar}
                     >
                       <Ionicons name="sparkles" size={16} color={COLORS.primary} />
                     </LinearGradient>
-                    <View style={styles.messageBubble}>
-                      <Text style={styles.messageText}>{message.content}</Text>
-                      <Text style={styles.messageTime}>
-                        {formatTime(message.created_at)}
-                      </Text>
+                  </Animated.View>
+                  <View style={[styles.messageBubble, styles.assistantBubble]}>
+                    <View style={styles.typingIndicator}>
+                      <View style={[styles.typingDot, styles.typingDot1]} />
+                      <View style={[styles.typingDot, styles.typingDot2]} />
+                      <View style={[styles.typingDot, styles.typingDot3]} />
                     </View>
+                    <Text style={styles.generatingText}>En train de réfléchir...</Text>
                   </View>
-                </Animated.View>
-              );
-            })
-          )}
-
-          {generating && (
-            <View style={styles.messageRow}>
-              <Animated.View style={[{ transform: [{ scale: pulseAnim }] }]}>
-                <LinearGradient
-                  colors={[COLORS.primary + '30', COLORS.accentPink + '20']}
-                  style={styles.messageAvatar}
-                >
-                  <Ionicons name="sparkles" size={16} color={COLORS.primary} />
-                </LinearGradient>
-              </Animated.View>
-              <View style={styles.messageBubble}>
-                <View style={styles.typingIndicator}>
-                  <View style={[styles.typingDot, styles.typingDot1]} />
-                  <View style={[styles.typingDot, styles.typingDot2]} />
-                  <View style={[styles.typingDot, styles.typingDot3]} />
                 </View>
-                <Text style={styles.generatingText}>Génération en cours...</Text>
-              </View>
-            </View>
+              )}
+            </>
           )}
         </ScrollView>
 
-        {/* Context Card */}
-        {lastContext && (
-          <View style={styles.contextCard}>
-            <View style={styles.contextItem}>
-              <View style={[styles.contextIconBg, { backgroundColor: COLORS.success + '20' }]}>
-                <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
-              </View>
-              <Text style={styles.contextValue}>
-                {lastContext.habits_completed}/{lastContext.habits_total}
-              </Text>
-              <Text style={styles.contextLabel}>Habitudes</Text>
-            </View>
-            <View style={styles.contextDivider} />
-            <View style={styles.contextItem}>
-              <View style={[styles.contextIconBg, { backgroundColor: COLORS.accentPink + '20' }]}>
-                <Ionicons name="heart" size={18} color={COLORS.accentPink} />
-              </View>
-              <Text style={styles.contextValue}>{lastContext.mood}/5</Text>
-              <Text style={styles.contextLabel}>Humeur</Text>
-            </View>
-            <View style={styles.contextDivider} />
-            <View style={styles.contextItem}>
-              <View style={[styles.contextIconBg, { backgroundColor: COLORS.warning + '20' }]}>
-                <Ionicons name="flame" size={18} color={COLORS.warning} />
-              </View>
-              <Text style={styles.contextValue}>
-                {lastContext.average_streak}j
-              </Text>
-              <Text style={styles.contextLabel}>Série</Text>
-            </View>
-          </View>
-        )}
-
-        {/* Action Button */}
+        {/* Input Area */}
         <View style={styles.inputContainer}>
-          <TouchableOpacity
-            style={[
-              styles.insightButtonWrapper,
-              generating && styles.insightButtonDisabled,
-            ]}
-            onPress={requestInsight}
-            disabled={generating}
-            activeOpacity={0.9}
-          >
-            <LinearGradient
-              colors={generating ? [COLORS.card, COLORS.card] : [COLORS.primary, COLORS.accentPink]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.insightButton}
+          <View style={styles.inputWrapper}>
+            <TextInput
+              ref={inputRef}
+              style={styles.textInput}
+              placeholder="Écris ton message..."
+              placeholderTextColor={COLORS.textSecondary}
+              value={inputText}
+              onChangeText={setInputText}
+              multiline
+              maxLength={1000}
+              editable={!sending}
+            />
+            <TouchableOpacity
+              style={[
+                styles.sendButton,
+                (!inputText.trim() || sending) && styles.sendButtonDisabled,
+              ]}
+              onPress={() => sendMessage(inputText)}
+              disabled={!inputText.trim() || sending}
             >
-              {generating ? (
-                <ActivityIndicator color={COLORS.textSecondary} />
-              ) : (
-                <>
-                  <Ionicons name="sparkles" size={22} color={COLORS.text} />
-                  <Text style={styles.insightButtonText}>
-                    Demander un insight
-                  </Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={inputText.trim() && !sending ? [COLORS.primary, COLORS.accentPink] : [COLORS.card, COLORS.card]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.sendButtonGradient}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color={COLORS.textSecondary} />
+                ) : (
+                  <Ionicons name="send" size={18} color={inputText.trim() ? COLORS.text : COLORS.textSecondary} />
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -413,17 +458,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   coachAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 20,
+    width: 52,
+    height: 52,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
   },
   coachName: {
     fontSize: 20,
@@ -447,6 +487,16 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontWeight: '500',
   },
+  clearButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.cardBorder,
+  },
   messagesContainer: {
     flex: 1,
   },
@@ -457,7 +507,7 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 40,
+    paddingTop: 20,
   },
   emptyIconBg: {
     width: 100,
@@ -478,33 +528,39 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 24,
-    paddingHorizontal: 20,
   },
-  featuresList: {
-    marginTop: 32,
+  quickPromptsContainer: {
     width: '100%',
-    paddingHorizontal: 20,
+    marginTop: 32,
   },
-  featureItem: {
+  quickPromptsTitle: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  quickPromptButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: 14,
+    borderRadius: 16,
     padding: 14,
     marginBottom: 10,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
   },
-  featureIcon: {
+  quickPromptIcon: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: COLORS.primary + '20',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-  featureText: {
+  quickPromptText: {
+    flex: 1,
     fontSize: 15,
     color: COLORS.text,
     fontWeight: '500',
@@ -530,6 +586,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     alignItems: 'flex-end',
   },
+  messageRowUser: {
+    justifyContent: 'flex-end',
+  },
   messageAvatar: {
     width: 36,
     height: 36,
@@ -538,25 +597,48 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 10,
   },
+  userAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  userAvatarText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
   messageBubble: {
-    backgroundColor: COLORS.surface,
     borderRadius: 18,
+    padding: 14,
+    maxWidth: '75%',
+  },
+  assistantBubble: {
+    backgroundColor: COLORS.surface,
     borderBottomLeftRadius: 6,
-    padding: 16,
-    maxWidth: '80%',
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
+  },
+  userBubble: {
+    backgroundColor: COLORS.primary,
+    borderBottomRightRadius: 6,
   },
   messageText: {
     fontSize: 15,
     color: COLORS.text,
-    lineHeight: 24,
+    lineHeight: 22,
   },
   messageTime: {
     fontSize: 11,
     color: COLORS.textSecondary,
-    marginTop: 8,
-    fontWeight: '500',
+    marginTop: 6,
+  },
+  messageTimeUser: {
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'right',
   },
   typingIndicator: {
     flexDirection: 'row',
@@ -582,73 +664,46 @@ const styles = StyleSheet.create({
   generatingText: {
     fontSize: 13,
     color: COLORS.textSecondary,
-    marginTop: 8,
+    marginTop: 6,
     fontStyle: 'italic',
   },
-  contextCard: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.surface,
-    marginHorizontal: 20,
-    borderRadius: 18,
+  inputContainer: {
     padding: 16,
-    marginBottom: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.cardBorder,
+    backgroundColor: COLORS.background,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: COLORS.cardBorder,
+    paddingLeft: 16,
+    paddingRight: 6,
+    paddingVertical: 6,
   },
-  contextItem: {
+  textInput: {
     flex: 1,
-    alignItems: 'center',
+    fontSize: 16,
+    color: COLORS.text,
+    maxHeight: 100,
+    paddingVertical: 8,
+    paddingRight: 8,
   },
-  contextIconBg: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
+  sendButton: {
+    marginLeft: 8,
+  },
+  sendButtonDisabled: {
+    opacity: 0.6,
+  },
+  sendButtonGradient: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
-  },
-  contextValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  contextLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  contextDivider: {
-    width: 1,
-    backgroundColor: COLORS.cardBorder,
-    marginHorizontal: 8,
-  },
-  inputContainer: {
-    padding: 20,
-    paddingTop: 8,
-  },
-  insightButtonWrapper: {
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  insightButtonDisabled: {
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  insightButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 18,
-    borderRadius: 18,
-    gap: 10,
-  },
-  insightButtonText: {
-    color: COLORS.text,
-    fontSize: 17,
-    fontWeight: '600',
   },
 });

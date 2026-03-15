@@ -81,6 +81,10 @@ class CoachMessage(BaseModel):
 class CoachRequest(BaseModel):
     user_name: Optional[str] = "Utilisateur"
 
+class ChatMessageRequest(BaseModel):
+    message: str
+    user_name: Optional[str] = "Utilisateur"
+
 class UserProfile(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = "Utilisateur"
@@ -346,10 +350,111 @@ Donne-lui un feedback personnalisé et un conseil concret basé sur les principe
         raise HTTPException(status_code=500, detail=f"Erreur lors de la génération de l'insight: {str(e)}")
 
 @api_router.get("/coach/messages", response_model=List[CoachMessage])
-async def get_coach_messages(limit: int = 20):
+async def get_coach_messages(limit: int = 50):
     """Récupérer l'historique des messages du coach"""
     messages = await db.coach_messages.find().sort("created_at", -1).to_list(limit)
     return [CoachMessage(**m) for m in reversed(messages)]
+
+@api_router.post("/coach/chat")
+async def chat_with_coach(request: ChatMessageRequest):
+    """Envoyer un message au coach et recevoir une réponse personnalisée"""
+    try:
+        today = date.today().isoformat()
+        
+        # Save user message
+        user_msg = CoachMessage(role="user", content=request.message)
+        await db.coach_messages.insert_one(user_msg.dict())
+        
+        # Get user context
+        habits = await db.habits.find({"is_active": True}).to_list(100)
+        today_logs = await db.habit_logs.find({"date": today}).to_list(100)
+        today_mood = await db.moods.find_one({"date": today})
+        recent_moods = await db.moods.find().sort("date", -1).to_list(7)
+        
+        # Build context
+        log_map = {log["habit_id"]: log["done"] for log in today_logs}
+        habit_summary = []
+        total_streak = 0
+        
+        for h in habits:
+            completed = log_map.get(h["id"], False)
+            status = "✅" if completed else "❌"
+            habit_summary.append(f"- {h['name']} ({h['category']}): {status}, série: {h.get('streak', 0)} jours")
+            total_streak += h.get("streak", 0)
+        
+        habit_data = "\n".join(habit_summary) if habit_summary else "Aucune habitude enregistrée"
+        mood_value = today_mood["mood"] if today_mood else "Non renseigné"
+        avg_mood = round(sum(m["mood"] for m in recent_moods) / len(recent_moods), 1) if recent_moods else "N/A"
+        
+        # Get recent conversation for context
+        recent_messages = await db.coach_messages.find().sort("created_at", -1).to_list(10)
+        conversation_context = ""
+        if recent_messages:
+            for msg in reversed(recent_messages[-6:]):  # Last 6 messages for context
+                role = "Utilisateur" if msg["role"] == "user" else "Coach"
+                conversation_context += f"{role}: {msg['content']}\n"
+        
+        # Build the AI prompt
+        system_prompt = f"""Tu es un coach bienveillant spécialisé en psychologie des habitudes et en thérapie comportementale et cognitive (TCC).
+Tu t'appelles Coach et tu parles toujours en français de manière chaleureuse et empathique.
+
+CONTEXTE DE L'UTILISATEUR ({request.user_name}):
+- Habitudes suivies:
+{habit_data}
+- Humeur du jour: {mood_value}/5
+- Humeur moyenne (7 jours): {avg_mood}/5
+
+TES COMPÉTENCES:
+1. Écoute active et empathie - tu valides les émotions avant de conseiller
+2. Techniques TCC: restructuration cognitive, exposition progressive, activation comportementale
+3. Motivation et renforcement positif
+4. Conseils pratiques et réalistes adaptés au contexte
+
+RÈGLES:
+- Réponds de manière concise (2-4 phrases max sauf si la situation nécessite plus)
+- Utilise des émojis avec parcimonie pour être chaleureux
+- Si l'utilisateur ne va pas bien, privilégie l'écoute avant les conseils
+- Propose des actions concrètes et réalisables
+- Fais référence à ses habitudes quand c'est pertinent"""
+
+        user_prompt = f"""Conversation récente:
+{conversation_context}
+
+Nouveau message de l'utilisateur: {request.message}
+
+Réponds de manière appropriée en tenant compte du contexte émotionnel et des habitudes de l'utilisateur."""
+        
+        # Call OpenAI via emergentintegrations
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"coach-chat-{today}",
+            system_message=system_prompt
+        ).with_model("openai", "gpt-4o-mini")
+        
+        user_message = UserMessage(text=user_prompt)
+        response = await chat.send_message(user_message)
+        
+        # Save assistant response
+        assistant_msg = CoachMessage(role="assistant", content=response)
+        await db.coach_messages.insert_one(assistant_msg.dict())
+        
+        logger.info(f"Coach chat response generated for {request.user_name}")
+        
+        return {
+            "response": response,
+            "user_message_id": user_msg.id,
+            "assistant_message_id": assistant_msg.id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in coach chat: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la conversation: {str(e)}")
+
+@api_router.delete("/coach/messages")
+async def clear_coach_messages():
+    """Effacer l'historique des messages du coach"""
+    await db.coach_messages.delete_many({})
+    return {"message": "Historique effacé"}
 
 # ==================== PROFILE ENDPOINTS ====================
 
