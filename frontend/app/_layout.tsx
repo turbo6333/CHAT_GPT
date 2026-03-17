@@ -1,83 +1,134 @@
-import React from 'react';
-import { Tabs } from 'expo-router';
-import { View, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState, createContext, useContext } from 'react';
+import { Stack, useRouter, useSegments } from 'expo-router';
+import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 const COLORS = {
   primary: '#8B5CF6',
-  primaryDark: '#6D28D9',
   background: '#0A0A0F',
   surface: '#13131A',
-  card: '#1C1C27',
   text: '#FFFFFF',
   textSecondary: '#71717A',
-  accent: '#22D3EE',
-  success: '#10B981',
-  warning: '#FBBF24',
 };
+
+// Auth Context
+interface User {
+  user_id: string;
+  email: string;
+  name: string;
+  picture?: string;
+  auth_type: string;
+}
+
+interface AuthContextType {
+  user: User | null;
+  isLoading: boolean;
+  login: (token: string, userData: User) => Promise<void>;
+  logout: () => Promise<void>;
+  checkAuth: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+}
+
+function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
+  const segments = useSegments();
+
+  const checkAuth = async () => {
+    try {
+      const token = await AsyncStorage.getItem('session_token');
+      if (!token) {
+        setUser(null);
+        setIsLoading(false);
+        return;
+      }
+
+      const response = await axios.get(`${BACKEND_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setUser(response.data);
+    } catch (error) {
+      console.log('Not authenticated');
+      await AsyncStorage.removeItem('session_token');
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const login = async (token: string, userData: User) => {
+    await AsyncStorage.setItem('session_token', token);
+    setUser(userData);
+  };
+
+  const logout = async () => {
+    try {
+      const token = await AsyncStorage.getItem('session_token');
+      if (token) {
+        await axios.post(`${BACKEND_URL}/api/auth/logout`, {}, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      await AsyncStorage.removeItem('session_token');
+      setUser(null);
+    }
+  };
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    const inAuthGroup = segments[0] === 'login' || segments[0] === 'register' || segments[0] === 'auth-callback';
+
+    if (!user && !inAuthGroup) {
+      // Not logged in and not in auth group, redirect to login
+      router.replace('/login');
+    } else if (user && inAuthGroup) {
+      // Logged in but in auth group, redirect to home
+      router.replace('/(tabs)');
+    }
+  }, [user, segments, isLoading]);
+
+  return (
+    <AuthContext.Provider value={{ user, isLoading, login, logout, checkAuth }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
 
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <View style={styles.container}>
-        <Tabs
-          screenOptions={{
-            headerShown: false,
-            tabBarStyle: styles.tabBar,
-            tabBarActiveTintColor: COLORS.primary,
-            tabBarInactiveTintColor: COLORS.textSecondary,
-            tabBarLabelStyle: styles.tabLabel,
-            tabBarItemStyle: styles.tabItem,
-          }}
-        >
-          <Tabs.Screen
-            name="index"
-            options={{
-              title: 'Accueil',
-              tabBarIcon: ({ color, focused }) => (
-                <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
-                  <Ionicons name={focused ? "home" : "home-outline"} size={22} color={color} />
-                </View>
-              ),
-            }}
-          />
-          <Tabs.Screen
-            name="habits"
-            options={{
-              title: 'Habitudes',
-              tabBarIcon: ({ color, focused }) => (
-                <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
-                  <Ionicons name={focused ? "checkmark-circle" : "checkmark-circle-outline"} size={22} color={color} />
-                </View>
-              ),
-            }}
-          />
-          <Tabs.Screen
-            name="coach"
-            options={{
-              title: 'Coach',
-              tabBarIcon: ({ color, focused }) => (
-                <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
-                  <Ionicons name={focused ? "sparkles" : "sparkles-outline"} size={22} color={color} />
-                </View>
-              ),
-            }}
-          />
-          <Tabs.Screen
-            name="profile"
-            options={{
-              title: 'Profil',
-              tabBarIcon: ({ color, focused }) => (
-                <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
-                  <Ionicons name={focused ? "person" : "person-outline"} size={22} color={color} />
-                </View>
-              ),
-            }}
-          />
-        </Tabs>
-      </View>
+      <AuthProvider>
+        <View style={styles.container}>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="login" />
+            <Stack.Screen name="register" />
+            <Stack.Screen name="auth-callback" />
+            <Stack.Screen name="(tabs)" />
+          </Stack>
+        </View>
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }
@@ -86,35 +137,5 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-  },
-  tabBar: {
-    backgroundColor: COLORS.surface,
-    borderTopWidth: 0,
-    height: 70,
-    paddingBottom: 10,
-    paddingTop: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 20,
-  },
-  tabLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  tabItem: {
-    paddingTop: 4,
-  },
-  iconContainer: {
-    width: 40,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconContainerActive: {
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
   },
 });
