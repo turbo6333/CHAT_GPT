@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">CoachHabits</string>
+    <string name="dashboard">Dashboard</string>
+    <string name="habits">Habitudes</string>
+    <string name="coach">Coach</string>
+    <string name="profile">Profil</string>
+    <string name="habit_name">Nom de l’habitude</string>
+    <string name="habit_category">Catégorie (sport/études/santé)</string>
+    <string name="habit_reminder">Heure du rappel</string>
+    <string name="add_habit">Ajouter</string>
+    <string name="current_streak">Streak actuel : %1$d jours</string>
+    <string name="ask_coach">Demander un conseil IA</string>
+    <string name="mood_title">Humeur du jour : %1$d/5</string>
+    <string name="reminder_title">Rappel CoachHabits</string>
+    <string name="reminder_content">Petit pas aujourd’hui, grand changement demain.</string>
+</resources>
